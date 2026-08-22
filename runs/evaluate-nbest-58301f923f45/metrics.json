@@ -1,0 +1,80 @@
+{
+  "baseline": {
+    "counts": {
+      "deletions": 0,
+      "error_rate": 0.05555555555555555,
+      "errors": 2,
+      "insertions": 1,
+      "reference_tokens": 36,
+      "substitutions": 1
+    },
+    "error_rate": 0.05555555555555555,
+    "metric_name": "wer",
+    "normalizer_id": "openai-whisper-english@20250625",
+    "utterance_count": 2
+  },
+  "diversity": {
+    "average_normalized_unique": 2.0,
+    "average_raw_unique": 9.5,
+    "cross_wer": {
+      "counts": {
+        "deletions": 0,
+        "error_rate": 0.05405405405405406,
+        "errors": 2,
+        "insertions": 0,
+        "reference_tokens": 37,
+        "substitutions": 2
+      },
+      "error_rate": 0.05405405405405406,
+      "metric_name": "cross_wer",
+      "normalizer_id": "openai-whisper-english@20250625",
+      "utterance_count": 2
+    },
+    "empty_candidate_count": 0,
+    "requested_n": 10
+  },
+  "oracle_by_n": {
+    "1": {
+      "counts": {
+        "deletions": 0,
+        "error_rate": 0.05555555555555555,
+        "errors": 2,
+        "insertions": 1,
+        "reference_tokens": 36,
+        "substitutions": 1
+      },
+      "error_rate": 0.05555555555555555,
+      "metric_name": "oracle_wer",
+      "normalizer_id": "openai-whisper-english@20250625",
+      "utterance_count": 2
+    },
+    "10": {
+      "counts": {
+        "deletions": 0,
+        "error_rate": 0.05555555555555555,
+        "errors": 2,
+        "insertions": 1,
+        "reference_tokens": 36,
+        "substitutions": 1
+      },
+      "error_rate": 0.05555555555555555,
+      "metric_name": "oracle_wer",
+      "normalizer_id": "openai-whisper-english@20250625",
+      "utterance_count": 2
+    },
+    "5": {
+      "counts": {
+        "deletions": 0,
+        "error_rate": 0.05555555555555555,
+        "errors": 2,
+        "insertions": 1,
+        "reference_tokens": 36,
+        "substitutions": 1
+      },
+      "error_rate": 0.05555555555555555,
+      "metric_name": "oracle_wer",
+      "normalizer_id": "openai-whisper-english@20250625",
+      "utterance_count": 2
+    }
+  }
+}

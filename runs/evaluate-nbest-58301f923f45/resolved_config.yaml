@@ -1,0 +1,4 @@
+artifact_path: data/processed/nbest/whisper-small-en/3809b6474dae2f5d79156a49d6baeb51398643baddd3af2c43530d0b82e9639d/records.jsonl
+artifact_sha256: 3809b6474dae2f5d79156a49d6baeb51398643baddd3af2c43530d0b82e9639d
+normalizer_id: openai-whisper-english@20250625
+requested_n: 10

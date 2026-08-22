@@ -1,0 +1,20 @@
+{
+  "command": [
+    "asr-ec",
+    "generate-nbest",
+    "--config",
+    "configs/asr/whisper_small_en_nbest10_smoke.yaml"
+  ],
+  "config_sha256": "2e312226a256dd7af641718dcd43717cb984d659525188b18a1d587b39cf8661",
+  "created_utc": "2026-08-22T01:15:55.957332+00:00",
+  "dependency_lock_sha256": "4873fff60995e2fc391f57e5769c6bbb4ec21660464b0028c31bf81ded4e47e8",
+  "git_commit": null,
+  "git_dirty": null,
+  "input_artifact_hashes": {
+    "manifest": "94d3ca4feff5a4f60b49259daeb851e893e1e94d156a61c3396505e847c1942a"
+  },
+  "output_artifact_hashes": {},
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "python_version": "3.10.17",
+  "run_id": "generate-nbest-2e312226a256-attempt-01"
+}

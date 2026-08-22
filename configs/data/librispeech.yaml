@@ -1,0 +1,18 @@
+dataset: librispeech
+source_root: data/raw/LibriSpeech
+output_root: data/manifests
+runs_root: runs
+normalizer: conservative-english@v1
+splits:
+  - train-clean-100
+  - train-clean-360
+  - train-other-500
+  - dev-clean
+  - dev-other
+  - test-clean
+  - test-other
+expected_counts:
+  dev-clean: 2703
+  dev-other: 2864
+  test-clean: 2620
+  test-other: 2939

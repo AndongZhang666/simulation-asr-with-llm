@@ -1,0 +1,20 @@
+{
+  "command": [
+    "asr-ec",
+    "evaluate-nbest",
+    "--artifact",
+    "data/processed/nbest/whisper-small-en/3809b6474dae2f5d79156a49d6baeb51398643baddd3af2c43530d0b82e9639d/records.jsonl"
+  ],
+  "config_sha256": "58301f923f4522234e10e2e3a362df213bb5310ecaa5a0b5c4c337813884dcaa",
+  "created_utc": "2026-08-22T01:24:28.496023+00:00",
+  "dependency_lock_sha256": "4873fff60995e2fc391f57e5769c6bbb4ec21660464b0028c31bf81ded4e47e8",
+  "git_commit": null,
+  "git_dirty": null,
+  "input_artifact_hashes": {
+    "nbest": "3809b6474dae2f5d79156a49d6baeb51398643baddd3af2c43530d0b82e9639d"
+  },
+  "output_artifact_hashes": {},
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "python_version": "3.10.17",
+  "run_id": "evaluate-nbest-58301f923f45"
+}

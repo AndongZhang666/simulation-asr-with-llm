@@ -1,0 +1,34 @@
+dependencies:
+  - name: openai-whisper
+    role: asr_backend_and_english_normalizer
+    upstream: https://github.com/openai/whisper
+    package_version: "20250625"
+    license: MIT
+    license_sha256: b5d65a59060e68c4ff940e1eddfa6f94b2d68fdf58ed7f4dd57721c997e35e9d
+    checkpoint:
+      model: small.en
+      url: https://openaipublic.azureedge.net/main/whisper/models/f953ad0fd29cacd07d5a9eda5624af0f6bcf2258be67c92b79389873d91e0872/small.en.pt
+      sha256: f953ad0fd29cacd07d5a9eda5624af0f6bcf2258be67c92b79389873d91e0872
+    local_adapter: src/asr_ec/asr/whisper_nbest.py
+    exact_target_code: false
+  - name: pytorch
+    role: whisper_runtime_and_teacher_forced_score_fixture
+    package_version: "2.13.0"
+    exact_target_code: false
+  - name: ffmpeg
+    role: public_FLAC_audio_decoding
+    installation: homebrew
+    version: "9.0.1"
+    exact_target_code: false
+planned_dependencies:
+  - name: transformers
+    role: t5_base_training_generation_and_candidate_scoring
+    model: google-t5/t5-base
+    revision: null
+    exact_target_code: false
+    status: not_installed
+  - name: sctk
+    role: independent_WER_crosscheck_and_ROVER
+    revision: null
+    exact_target_code: false
+    status: not_installed

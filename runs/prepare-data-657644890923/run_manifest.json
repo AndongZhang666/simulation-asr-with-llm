@@ -1,0 +1,18 @@
+{
+  "command": [
+    "asr-ec",
+    "prepare-data",
+    "--config",
+    "configs/data/librispeech_test_clean_smoke.yaml"
+  ],
+  "config_sha256": "6576448909235559c35c1a31bcf67a06ef52b6007debcbf2f3b73f07dd55cbfa",
+  "created_utc": "2026-08-22T00:52:39.219600+00:00",
+  "dependency_lock_sha256": "085ea7dfcd4426593c3cea80b3316e4c50ed24fa803d43be8fc14d3ddb9b5f57",
+  "git_commit": null,
+  "git_dirty": null,
+  "input_artifact_hashes": {},
+  "output_artifact_hashes": {},
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "python_version": "3.10.17",
+  "run_id": "prepare-data-657644890923"
+}

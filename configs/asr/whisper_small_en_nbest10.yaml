@@ -1,0 +1,12 @@
+backend: whisper
+package_version: "20250625"
+model: small.en
+model_revision: null
+nbest: 10
+beam_size: 10
+temperature: 0
+condition_on_previous_text: false
+language: en
+task: transcribe
+score_type: sum_logprob
+stochastic_fallback: false

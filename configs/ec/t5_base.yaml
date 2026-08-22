@@ -1,0 +1,19 @@
+model: google-t5/t5-base
+model_revision: null
+serialization:
+  variant: literal_sep
+  prefix: ""
+  separator: "[SEP]"
+max_source_length: null
+max_target_length: null
+optimizer: adamw
+learning_rate: 5.0e-5
+effective_batch_size: 32
+device_batch_size: null
+gradient_accumulation_steps: null
+epochs: 3
+dropout: 0.1
+scheduler: none
+weight_decay: null
+precision: null
+seed: 13

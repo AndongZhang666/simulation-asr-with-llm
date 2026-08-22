@@ -1,0 +1,9 @@
+dataset: librispeech
+expected_counts:
+  test-clean: 2620
+normalizer: conservative-english@v1
+output_root: data/manifests
+runs_root: runs
+source_root: data/raw/LibriSpeech
+splits:
+- test-clean
