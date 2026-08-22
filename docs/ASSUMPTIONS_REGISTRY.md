@@ -1,0 +1,22 @@
+# Assumptions Registry
+
+This registry is append-only. Each experimental run will materialize the applicable
+entries as `runs/<run-id>/assumptions.json`.
+
+| ID | Label | Choice | Rationale | Impact / resolution |
+| --- | --- | --- | --- | --- |
+| A1 | PAPER | Frame the initial system as ordered N-best ASR text to EC text. | The paper specifies post-ASR correction with ranked hypotheses. | Implemented in the primary data contracts. |
+| A2 | PAPER | Primary supervised input is literal `hyp1 [SEP] hyp2 ...`. | The paper visibly shows `[SEP]`; its tokenizer treatment is unreported. | Add special-token and sentinel variants later; select only on development data. |
+| A3 | PAPER | Main EC target is T5-base with AdamW, lr `5e-5`, batch 32, dropout 0.1, three epochs. | Reported in the paper. | Actual device batch size and accumulation will be recorded if hardware requires it. |
+| A4 | PAPER | Constrained lambda grid is `0.00..1.00` by `0.05`, selected on validation data only. | Reported in Sec. V-B. | The test split is never used to select lambda. |
+| A5 | INFERENCE | Use word-level Levenshtein for English closest projection and stable tie-breaking. | The paper does not specify distance granularity or ties. | Record tie stage and add a character-level Chinese policy before AISHELL work. |
+| A6 | RECOMMENDATION | Preserve raw repeated hypotheses and compute normalized uniqueness only as a diagnostic. | The paper notes formatting-only repetition; source documents prohibit primary deduplication. | Enforced by contracts and diversity reporting. |
+| A7 | OPEN_GAP | Exact Whisper revision, N-best patch, score semantics, and segment composition are unavailable. | The target implementation was not located. | Do not claim numerical parity until N=1 and score tests pass. |
+| A8 | OPEN_GAP | Exact historical GPT model snapshots are retired. | `gpt-3.5-turbo-0613` and `gpt-4-0125-preview` cannot support a fresh historical replay. | Label any new API experiment as current-model zero-shot reproduction. |
+| A9 | RECOMMENDATION | Phase 1 uses standard-library runtime logic to avoid a model dependency before metrics are tested. | The environment has no locked dependency manager and no need for model execution at this gate. | Add pinned/labeled dependencies only when their phase is entered. |
+| A10 | OPEN_GAP | English normalizer revision is not reported by the paper. | The paper names Whisper normalization but not a commit. | Start with a documented local conservative normalizer; replace with a pinned Whisper adapter before baseline comparison. |
+| A11 | RECOMMENDATION | Full datasets/models/API calls are deferred until resource, access, and cost gates are recorded. | Network status and API budget are unverified; disk is finite. | Only synthetic unit fixtures are used in Phase 1. |
+| A12 | WEB-VERIFIED | Use `openai-whisper==20250625` with official `small.en` checkpoint SHA-256 `f953ad0fd29cacd07d5a9eda5624af0f6bcf2258be67c92b79389873d91e0872` for the current public method-reproduction smoke path. | The current PyPI package release and checkpoint URL/digest were verified on 2026-08-21. | This is not claimed to be the paper's unpublished revision; the package/config is recorded in every new artifact. |
+| A13 | PAPER + INFERENCE | Store raw cumulative beam `sum_logprob` as the ASR score and separately store Whisper's length-penalized ranking score in candidate metadata. | The pinned upstream decoder accumulates log probabilities then ranks with `MaximumLikelihoodRanker`; cross-backend score comparability is still unestablished. | Constrained interpolation must state its score policy and retain the raw fields. |
+| A14 | OPEN_GAP | Token-level log probabilities are currently stored as unavailable for Whisper N-best artifacts. | Upstream finalized beams expose cumulative scores but not the per-token trace required for a defensible reconstruction without further decoder instrumentation. | Do not calculate word confidence from these artifacts until a tested token-trace patch is added. |
+| A15 | WEB-VERIFIED | Use `openai-whisper`'s `EnglishTextNormalizer` through a versioned adapter for generated Whisper artifacts. | The pinned normalizer is callable rather than protocol-shaped; the adapter records `openai-whisper-english@20250625`. | The conservative normalizer remains only for data-manifest and unit-fixture stages. |

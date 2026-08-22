@@ -1,0 +1,32 @@
+{
+  "00_README_INDEX.txt": {
+    "sha256": "e3c549b24c3201da80b9d38f4fba0c0d8864b4606609251a3b6d1a4f88e84db1",
+    "bytes": 6952,
+    "lines": 144
+  },
+  "01_Paper_to_Implementation_Reproduction_Spec.txt": {
+    "sha256": "504b8dec23142766c906c28049a57fadd7824aacaf7062f885f3764ae49b65bf",
+    "bytes": 41316,
+    "lines": 980
+  },
+  "02_Codebase_Architecture_and_Module_Contracts.txt": {
+    "sha256": "c4f1767b2d868d3fa35d829b4a1518200119135b749f702ca46680f543ddb187",
+    "bytes": 22057,
+    "lines": 797
+  },
+  "03_AI_Agent_Rebuild_Runbook.txt": {
+    "sha256": "768fd84e2867f307d82ddf173a7d29569b0cece183e35372688215fe2092f5d3",
+    "bytes": 21666,
+    "lines": 570
+  },
+  "04_Open_Source_and_Reproducibility_Investigation.txt": {
+    "sha256": "e10e1e1851adff49663342fadbdb3723dfed6fd64d000d8775be9a7a21075e56",
+    "bytes": 17652,
+    "lines": 467
+  },
+  "05_Combined_All_in_One_Agent_Context.txt": {
+    "sha256": "52c2d2b4bea268ed27c0860a2f2f352fcf72c89bbdfe2ad9b2cd5ecccb4e5d65",
+    "bytes": 112433,
+    "lines": 2998
+  }
+}

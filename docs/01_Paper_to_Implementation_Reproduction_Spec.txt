@@ -1,0 +1,980 @@
+ASR ERROR CORRECTION USING LARGE LANGUAGE MODELS
+PAPER-TO-IMPLEMENTATION REPRODUCTION SPECIFICATION
+
+Document role
+-------------
+This document is the technical source of truth for rebuilding the methods in the 2025
+paper. It paraphrases the paper rather than reproducing it verbatim. It separates the
+paper's explicit information from reconstruction choices and unresolved gaps.
+
+======================================================================
+1. RESEARCH QUESTION AND SYSTEM BOUNDARY
+======================================================================
+
+[PAPER] The work treats ASR error correction (EC) as post-processing. The EC model
+receives decoded text hypotheses rather than acoustic features, ASR weights, or internal
+training code. This permits adaptation of black-box or restricted-access ASR systems.
+
+[PAPER] Instead of using only the ASR 1-best transcript, the main method provides an
+ordered N-best list to the EC model. Alternative hypotheses can contain words that are
+missing or wrong in the top hypothesis and therefore supply useful correction cues.
+
+[PAPER] The paper investigates two EC families:
+
+A. Supervised N-best T5
+   - Encoder-decoder pre-trained language model.
+   - Fine-tuned on ASR N-best input -> manual reference pairs.
+   - Supports direct generation and explicit candidate/lattice scoring.
+
+B. Zero-shot generative LLM EC
+   - No task-specific parameter updates.
+   - Receives an N-best list and an instruction prompt.
+   - Either generates a corrected transcript or selects one N-best option.
+
+[PAPER] The paper also studies transfer across domains and ASR systems, N-best lists
+built from more than one recognizer, Chinese EC, and possible test-set contamination in
+closed LLM pretraining data.
+
+System boundary:
+
+  audio
+    -> ASR decoder
+    -> ordered N-best hypotheses + ASR scores (+ optional lattice)
+    -> EC input serialization
+    -> supervised T5 or zero-shot LLM
+    -> decoding strategy
+    -> normalization
+    -> WER/CER and diagnostic metrics
+
+Non-goals of the target paper:
+- Joint acoustic/EC training.
+- Updating a proprietary ASR model.
+- Using audio features in the proposed EC model.
+- Claiming one decoding strategy is universally best.
+
+======================================================================
+2. REQUIRED DATA RECORD
+======================================================================
+
+[RECOMMENDATION] Store one immutable JSONL record per utterance. The minimum schema is:
+
+{
+  "schema_version": "1.0",
+  "utt_id": "string",
+  "dataset": "librispeech",
+  "split": "test_other",
+  "audio_path": "relative/or/content-addressed/path.wav",
+  "reference": {
+    "raw": "manual reference before evaluation normalization",
+    "normalized": "normalizer(reference.raw)"
+  },
+  "asr": {
+    "system_id": "whisper-small.en-or-espnet-transducer",
+    "checkpoint": "exact model identifier",
+    "code_revision": "git SHA or package version",
+    "decode_config_sha256": "...",
+    "hypotheses": [
+      {
+        "rank": 1,
+        "text_raw": "...",
+        "text_normalized": "...",
+        "token_ids": [1, 2, 3],
+        "token_logprobs": [-0.1, -0.3, -0.2],
+        "sequence_logscore": -12.34,
+        "score_type": "sum_logprob",
+        "length_penalty": null
+      }
+    ]
+  },
+  "lattice_uri": null,
+  "provenance": {
+    "created_utc": "ISO-8601",
+    "host": "...",
+    "gpu": "...",
+    "software_lock_sha256": "..."
+  }
+}
+
+[PAPER] Hypotheses must be ordered by descending ASR posterior score before being
+provided to the EC model or zero-shot prompt.
+
+[OPEN-GAP] The paper does not define a portable score convention across the Transducer
+and Whisper implementations. Do not call two scores comparable unless the implementation
+has verified their semantics. Preserve raw scores and document whether they are summed
+log probabilities, length-normalized scores, decoder scores, or another quantity.
+
+======================================================================
+3. SUPERVISED N-BEST T5
+======================================================================
+
+3.1 Input and target
+--------------------
+[PAPER] The encoder input is the ordered N-best list concatenated with a separator token.
+For N hypotheses z_1 ... z_N:
+
+  input_text = z_1 + " [SEP] " + z_2 + ... + " [SEP] " + z_N
+  target_text = manual_reference
+
+[PAPER] Figure 1 shows this architecture: the concatenated hypotheses enter a
+bidirectional Transformer encoder and a Transformer decoder generates the corrected
+transcript.
+
+[REFERENCE-PAPER] The earlier N-best T5 paper by the same group reports using a task
+prefix similar to "text correction:" before the concatenated hypotheses.
+
+[OPEN-GAP] The target 2025 article does not state whether this prefix was retained, how
+`[SEP]` was introduced to the T5 tokenizer, or whether it was represented by a native T5
+sentinel token, literal text, or an added special token.
+
+[RECOMMENDATION] Implement all three input variants behind configuration:
+
+  serialization.variant = "literal_sep"
+      "hyp1 [SEP] hyp2 ..."
+
+  serialization.variant = "added_special_sep"
+      add one tokenizer special token and resize embeddings
+
+  serialization.variant = "t5_sentinel"
+      "hyp1 <extra_id_0> hyp2 ..."
+
+Use the variant that best reproduces validation WER. The first faithful attempt should
+use the paper's visible literal form and record exactly how the tokenizer splits it.
+Do not tune this on the test set.
+
+3.2 Base model and optimization
+-------------------------------
+[PAPER]
+- Base EC model: T5-base.
+- Optimizer: AdamW.
+- Initial learning rate: 5e-5.
+- Batch size: 32.
+- Dropout: 0.1.
+- Fine-tuning duration: 3 epochs.
+
+[OPEN-GAP]
+- Exact T5 checkpoint/revision.
+- Maximum source and target lengths.
+- Effective batch size if gradient accumulation was used.
+- Learning-rate scheduler and warm-up.
+- AdamW beta/epsilon/weight decay.
+- Gradient clipping.
+- Mixed precision.
+- Beam width and length penalty for T5 generation.
+- Validation selection criterion.
+- Random seeds and number of runs.
+
+[RECOMMENDATION] Start with:
+- `google-t5/t5-base` or the equivalent pinned canonical T5-base checkpoint.
+- max_source_length determined from the 99.9th percentile of serialized 10-best inputs,
+  capped only after measuring truncation.
+- max_target_length based on references plus a small margin.
+- AdamW defaults except lr=5e-5; weight decay explicitly configured and logged.
+- no scheduler in the first attempt unless validation indicates instability.
+- deterministic seed set {13, 37, 73}; report mean and standard deviation after the
+  single-seed pipeline is validated.
+- mixed precision allowed, but keep a deterministic full-precision smoke test.
+
+3.3 Construction of supervised training pairs
+----------------------------------------------
+[PAPER] Each EC model is intended to use hypotheses generated by the corresponding ASR
+system on the same ASR training corpus.
+
+[PAPER] The LibriSpeech-trained Transducer fit its training speech so well that its
+hypotheses contained too few errors for practical EC training. The authors therefore
+applied unusually strong SpecAugment during ASR decoding to create erroneous but still
+usable hypotheses:
+
+- Two frequency masks, F = 30.
+- Eight time masks, T = 40.
+- Time warping, W = 40.
+- Discard utterance pairs whose WER exceeds 0.25.
+- Approximately 262,000 sentence pairs remain.
+
+[OPEN-GAP] The article clearly motivates this procedure for the Transducer, but does not
+fully specify whether identical perturbation was used to create the Whisper EC training
+set, whether all N hypotheses were filtered jointly or only by top-1 WER, or which
+SpecAugment randomization was used per epoch/utterance.
+
+[RECOMMENDATION] Implement a reproducible data-generation matrix:
+
+  clean_decode:
+      original audio, no extra perturbation
+
+  augmented_decode:
+      fixed per-utterance augmentation seed
+      freq_masks=2, freq_mask_width=30
+      time_masks=8, time_mask_width=40
+      time_warp_window=40
+
+  filter_rule:
+      default = top1_word_error_rate <= 0.25
+      save excluded records and reason
+
+Perform an ablation comparing clean and augmented Whisper training pairs rather than
+silently assuming that the Transducer recipe applies unchanged.
+
+3.4 Training objective
+----------------------
+[PAPER] Standard sequence-to-sequence maximum likelihood is implied:
+
+  L_EC = - sum_t log P(y_t | y_<t, Z; theta_EC)
+
+where Z is the serialized N-best input and y is the manual reference.
+
+[RECOMMENDATION] Mask padding tokens from the loss. Keep references in the same text
+space used for scoring; do not normalize training targets differently without logging a
+separate experiment.
+
+3.5 Required training diagnostics
+----------------------------------
+At every evaluation checkpoint, log:
+- train and validation token loss;
+- top-1 baseline WER;
+- N-best oracle WER;
+- unconstrained EC WER;
+- rate at which EC output exactly equals top-1;
+- average edit distance from EC output to top-1;
+- deletion, insertion, and substitution rates;
+- truncation rates for source and target;
+- examples of beneficial corrections, overcorrections, and hallucinations.
+
+======================================================================
+4. ZERO-SHOT N-BEST LLM ERROR CORRECTION
+======================================================================
+
+4.1 Paper model snapshots
+-------------------------
+[PAPER]
+- gpt-3.5-turbo-0613, called GPT-3.5 in the paper.
+- gpt-4-0125-preview, called GPT-4 in the paper.
+
+[WEB-VERIFIED] These exact historical API snapshots are no longer available as of the
+investigation date. Therefore, exact numerical replay of the paper's zero-shot tables
+requires saved historical outputs or author-provided logs. A current API experiment is a
+method reproduction, not a historical replication.
+
+4.2 Unconstrained prompt
+------------------------
+[PAPER] The prompt states that the inputs are the top N ASR outputs, says they are ordered
+by posterior score, wraps each sentence in numbered hypothesis tags, and requests only a
+single corrected top-1 transcript with no explanation.
+
+[RECOMMENDATION] Operational template:
+
+SYSTEM:
+  You are an ASR transcript correction component. Return only the requested transcript.
+
+USER:
+  Correct the utterance using the top {N} hypotheses below. They are ordered from
+  highest to lowest ASR score.
+  <hypothesis1>{text_1}</hypothesis1>
+  ...
+  <hypothesisN>{text_N}</hypothesisN>
+  Return one corrected transcript only. Do not explain the answer and do not add labels.
+
+4.3 Constrained-selection prompt
+--------------------------------
+[PAPER] For zero-shot constrained decoding, the LLM is not asked to rewrite freely. It
+sees each hypothesis inside an `<optioni>...</optioni>` tag and must return the selected
+option and its transcription.
+
+[RECOMMENDATION] Require a machine-parseable answer:
+
+SYSTEM:
+  Select exactly one ASR candidate. Never rewrite a candidate.
+
+USER:
+  Select the most likely transcript from the ordered candidates.
+  <option1>{text_1}</option1>
+  ...
+  <optionN>{text_N}</optionN>
+  Return exactly: <selection index="i">{verbatim candidate i}</selection>
+
+Parser rules:
+1. Parse the index.
+2. Verify the returned text is byte-for-byte or normalized-text equal to that candidate.
+3. If parsing fails, retry once with a repair instruction.
+4. If it still fails, mark the sample invalid; do not silently substitute top-1.
+
+4.4 Generation controls
+-----------------------
+[OPEN-GAP] The paper does not report API temperature, top-p, random seed, retries, rate
+limits, request concurrency, or output parsing policy.
+
+[RECOMMENDATION]
+- temperature=0 or the provider's most deterministic setting;
+- top_p=1 unless the API forbids it;
+- one primary request and at most one format-repair request;
+- save raw request and response, API model ID, date, SDK version, token use, latency,
+  and provider request identifier;
+- use a pinned model snapshot when the provider offers one;
+- never overwrite a previous model's output;
+- calculate cost before launching a full test set.
+
+4.5 Few-shot
+------------
+[PAPER] Preliminary few-shot experiments were less stable and more expensive than
+zero-shot prompting, so the paper focuses mainly on zero-shot results.
+
+[RECOMMENDATION] Do not add few-shot examples until the zero-shot reproduction is frozen.
+If added, select demonstrations only from a development set and disclose the selection
+method.
+
+======================================================================
+5. DECODING ALGORITHMS
+======================================================================
+
+Notation
+--------
+Z = {z_1, ..., z_N}: ordered ASR N-best hypotheses.
+x: acoustic input.
+theta_ASR: ASR model parameters.
+theta_EC: EC model parameters.
+S_ASR(z): stored ASR sequence score.
+S_EC(z | Z): T5 sequence log probability conditioned on the entire N-best input.
+lambda: interpolation weight in [0, 1].
+
+5.1 Unconstrained decoding (`uncon`)
+------------------------------------
+[PAPER]
+
+  y_uncon = argmax_y log P(y | Z; theta_EC)
+
+The output is not required to be one of the ASR hypotheses.
+
+Implementation:
+1. Serialize Z.
+2. Encode with T5.
+3. Run autoregressive beam search.
+4. Decode the best sequence.
+5. Preserve raw output and normalized output.
+
+[OPEN-GAP] T5 beam width, length penalty, repetition penalty, and early stopping are not
+specified.
+
+[RECOMMENDATION] Use a validation sweep over beam sizes {1, 4, 8} and length penalties
+{0.8, 1.0, 1.2}; freeze a single setting before testing. Greedy decoding is the most
+transparent initial baseline.
+
+5.2 N-best constrained decoding (`constr`)
+------------------------------------------
+[PAPER]
+
+  y_constr = argmax_{y in Z} [
+      (1 - lambda) * log P(y | x; theta_ASR)
+      + lambda * log P(y | Z; theta_EC)
+  ]
+
+[PAPER] The interpolation weight is selected on validation data from 0.0 to 1.0 in
+increments of 0.05.
+
+Supervised implementation:
+1. For every candidate z_i, teacher-force z_i through T5 conditioned on serialized Z.
+2. Sum log P(z_i,t | z_i,<t, Z) across non-padding tokens.
+3. Read the stored ASR score for z_i.
+4. Combine the two scores for each lambda.
+5. Choose the highest-scoring candidate.
+6. Select one lambda per evaluation condition using validation WER only.
+
+Pseudocode:
+
+  for utterance in dataset:
+      Z = utterance.nbest
+      for z in Z:
+          ec[z] = t5_sequence_logprob(serialized_Z, z)
+          asr[z] = stored_asr_score(z)
+      output = argmax_z ((1-lambda)*asr[z] + lambda*ec[z])
+
+[OPEN-GAP] The paper does not state whether either score is length-normalized before
+interpolation. It also does not state whether scores were standardized across an
+utterance or corpus.
+
+[RECOMMENDATION]
+- Faithful attempt A: use raw cumulative log scores.
+- Diagnostic attempt B: divide both scores by token count in their native tokenization.
+- Diagnostic attempt C: z-normalize scores within each N-best list.
+- Never mix the best result from these alternatives into the main result without
+  labeling it as an ablation.
+
+5.3 N-best closest decoding (`closest`)
+---------------------------------------
+[PAPER]
+
+  y_uncon = unconstrained_generate(Z)
+  y_closest = argmin_{z in Z} LevenshteinDistance(y_uncon, z)
+
+This can be viewed as post-hoc projection of a free generation onto the ASR candidate set.
+
+[OPEN-GAP] The distance unit and tie-breaking rule are not specified.
+
+[RECOMMENDATION]
+- Use word-level Levenshtein distance for English because the evaluation target is WER.
+- For Chinese, use normalized character-level distance.
+- Tie-break by higher EC sequence score, then higher ASR rank, then stable lexical order.
+- Log tie frequency and the selected tie-break stage.
+
+5.4 Lattice-constrained decoding (`lattice`)
+--------------------------------------------
+[PAPER]
+
+  y_lattice = argmax_{y in G} [
+      (1 - lambda) * S_ASR(y)
+      + lambda * S_EC(y | Z)
+  ]
+
+where G is the set of paths through an ASR lattice.
+
+[PAPER] The ASR and T5 tokenizers differ. The article's Figure 3 therefore uses a
+three-stage representation:
+1. Original ASR BPE-token lattice.
+2. Equivalent word lattice created by dynamic programming/path merging.
+3. Each word edge segmented into T5 BPE tokens.
+
+[PAPER] The search follows a topological dynamic program with a bounded heap of partial
+hypotheses at every lattice node. The experiments use lattice beam width 1 because larger
+beams did not improve preliminary performance enough to justify their cost.
+
+Conceptual pseudocode:
+
+  nodes = topological_sort(lattice)
+  beams[start] = [{history: [decoder_start], score: 0}]
+
+  for node in nodes:
+      for partial in beams[node]:
+          for outgoing_edge in node.edges:
+              # An edge may expand to one or more T5 subword tokens.
+              state = partial
+              for token in outgoing_edge.t5_tokens:
+                  logp_ec = T5.next_token_logprob(Z, state.history, token)
+                  state.score += lambda * logp_ec
+                  state.history.append(token)
+              state.score += (1-lambda) * outgoing_edge.asr_logscore
+              insert_with_beam_pruning(beams[outgoing_edge.dst], state, beam=b)
+
+  return best_complete_state(beams[end])
+
+[OPEN-GAP]
+- Exact lattice exporter from ESPnet.
+- Definition and accumulation of ASR edge scores.
+- Word-boundary rules in ASR BPE-to-word conversion.
+- Distribution of a word-edge ASR score over multiple T5 subword edges.
+- BOS/EOS handling.
+- Epsilon arcs.
+- Duplicate-path merging and numerical stabilization.
+
+[RECOMMENDATION] Treat lattice reproduction as an isolated subproject with golden toy
+lattices. Do not start it until N-best constrained scoring is correct.
+
+======================================================================
+6. ASR SYSTEMS
+======================================================================
+
+6.1 Conformer-Transducer
+------------------------
+[PAPER]
+- Trained with the LibriSpeech 960-hour recipe in ESPnet.
+- Encoder: 12 Conformer layers, hidden size 512.
+- Predictor: one LSTM layer.
+- Predictor hidden dimension: 512.
+- Jointer hidden dimension: 512.
+- Training augmentation: SpecAugment and speed perturbation.
+- Decoding beam size: 10.
+- Save the top hypotheses.
+
+[OPEN-GAP]
+- Exact ESPnet commit and recipe/config file.
+- Frontend, tokenizer vocabulary size, blank ID, loss options, optimizer/scheduler,
+  checkpoint averaging, and decoding score configuration.
+- Exact released or private checkpoint.
+
+[RECOMMENDATION]
+1. First search public ESPnet model zoo checkpoints for a matching 12x512 Conformer-RNN-T.
+2. If a close public checkpoint has baseline WER within approximately 0.2 absolute of the
+   article, use it for method reproduction and disclose architecture differences.
+3. Retrain only if baseline proximity is essential and compute is available.
+4. Pin the ESPnet commit and complete YAML in every result directory.
+
+6.2 Whisper
+-----------
+[PAPER]
+- Model: Whisper small.en.
+- The ordinary implementation returns one hypothesis and sentence-level confidence.
+- The authors modified it to save ten hypotheses and token-level softmax probabilities,
+  from which word-level confidence could be calculated.
+- English references and hypotheses are normalized with Whisper's text normalizer before
+  WER computation.
+
+[OPEN-GAP]
+- Exact Whisper commit/release.
+- The authors' N-best/token-probability patch.
+- Beam settings beyond the desired N=10.
+- Length penalty, temperature/fallback behavior, segment stitching, duplicate removal,
+  and how per-segment alternatives become an utterance-level N-best list.
+
+[RECOMMENDATION] The patch must expose candidates before the stock ranker discards all
+but the best beam. For each utterance, save:
+- candidate token IDs;
+- per-token log probabilities;
+- cumulative log score;
+- length-normalized score if used;
+- decoded text;
+- segment boundaries and timestamps if long-form decoding is used.
+
+For LibriSpeech, force English transcription, disable stochastic temperature fallback,
+and use utterance-level audio without long-form segmentation wherever the dataset recipe
+permits. Remove exact duplicate normalized hypotheses only for diversity analysis; retain
+them in the raw artifact because the paper studies repeated entries.
+
+======================================================================
+7. DATASETS AND SPLITS
+======================================================================
+
+[PAPER] Main English datasets:
+
+Dataset / subset             Utterances     Words       Hours
+----------------------------------------------------------------
+LibriSpeech train               281,231      9.4M       960.9
+LibriSpeech test_clean            2,620      53K          5.4
+LibriSpeech test_other            2,939      52K          5.1
+TED-LIUM3 test                    1,155      28K          2.6
+Artie Bias test                   1,712      15K          2.4
+
+[PAPER] Chinese evaluation:
+
+AISHELL-1 test                     7,176     111K         10.0
+
+[PAPER] LibriSpeech is used for training the ASR/EC systems. TED-LIUM3 and Artie Bias
+serve as out-of-domain tests. AISHELL-1 is used for Chinese zero-shot EC. The paper also
+uses internal MGB-3 and Linguaskill data only in the contamination analysis; those
+internal sets cannot be fully reproduced from public resources.
+
+[RECOMMENDATION] Create dataset manifests with content hashes and verify utterance counts
+before decoding. Keep a separate manifest for every public release/version.
+
+======================================================================
+8. NORMALIZATION AND METRICS
+======================================================================
+
+8.1 English normalization
+-------------------------
+[PAPER] For Whisper experiments, both references and hypotheses are processed with the
+Whisper text normalization scripts before WER.
+
+[OPEN-GAP] The paper does not identify the exact normalizer revision or fully state how
+normalization is applied to Transducer experiments.
+
+[RECOMMENDATION]
+- Implement `raw`, `asr_normalized`, and `evaluation_normalized` text fields.
+- Unit-test apostrophes, numerals, abbreviations, punctuation, casing, and empty strings.
+- Pin the normalizer code revision.
+- Recompute the top-1 WER from saved text; do not trust a copied aggregate number.
+
+8.2 Chinese normalization
+-------------------------
+[PAPER] The original Whisper project did not provide the required Chinese normalizer, so
+the authors used the public `speechio/chinese_text_normalization` project.
+
+[RECOMMENDATION] Pin that repository revision and calculate CER after normalization.
+
+8.3 Core metrics
+----------------
+WER = (S + D + I) / N_ref
+WERR = (WER_baseline - WER_system) / WER_baseline * 100%
+CER uses the same edit accounting over characters.
+
+N-best oracle WER:
+  For each utterance, choose the candidate with minimum reference WER, sum corpus edits,
+  and divide by the total reference word count. Do not average utterance WERs.
+
+Additional paper diagnostics:
+- Uniq: average number of unique normalized hypotheses in each N-best list.
+- Cross WER: pairwise differences among unique hypotheses, with substitution, deletion,
+  and insertion breakdown.
+- Error-type breakdown for selected ASR/EC outputs.
+
+[OPEN-GAP] Cross-WER aggregation details are not fully formalized.
+
+[RECOMMENDATION] Define it explicitly in code and report the formula. A defensible version:
+1. Normalize each hypothesis.
+2. Retain stable unique strings.
+3. Score every unordered pair in both orientations or use a documented canonical
+   orientation.
+4. Sum edit counts and reference lengths corpus-wide.
+5. Report S/D/I and total.
+
+======================================================================
+9. PAPER RESULT TARGETS
+======================================================================
+
+These values are acceptance references, not guaranteed outputs. A reproduced EC number is
+comparable only when its underlying ASR baseline and evaluation normalization are close.
+
+9.1 In-domain supervised EC, WER (%)
+------------------------------------
+
+System / decoding       Transducer clean  Transducer other  Whisper clean  Whisper other
+------------------------------------------------------------------------------------------
+Baseline                       2.79              6.90             3.52           7.37
+5-best oracle                  1.42              4.59             2.38           5.24
+10-best oracle                 1.31              4.25             2.14           4.73
+10-best T5 uncon               2.54              6.37             2.90           6.39
+10-best T5 constr              2.42              6.15             3.10           6.69
+10-best T5 closest             2.50              6.24             3.11           6.52
+10-best T5 lattice             2.41              6.10              -              -
+
+Interpretation:
+- Constrained/lattice methods help the Transducer setting.
+- Whisper T5 works best with free generation in the reported in-domain experiment.
+- A constraint may hurt when the correct sequence is not represented well in the N-best
+  list or the EC model has learned reliable free corrections.
+
+9.2 Cross-domain and cross-ASR supervised EC, WER (%)
+-----------------------------------------------------
+
+Condition A: train EC on Transducer LibriSpeech; apply to Transducer outputs
+                       TED-LIUM3   Artie Bias
+Baseline                  13.53       23.67
+10-best oracle             10.21       16.69
+10-best T5 uncon           12.00       21.24
+10-best T5 constr          12.12       21.36
+
+Condition B: train EC on Whisper LibriSpeech; apply to Whisper outputs
+                       TED-LIUM3   Artie Bias
+Baseline                   3.89        9.03
+10-best oracle              2.59        5.60
+10-best T5 uncon            4.56        9.16
+10-best T5 constr           3.64        8.14
+
+Condition C: train EC on Whisper outputs; apply to Transducer LibriSpeech outputs
+                       test_clean  test_other
+Baseline                   2.79        6.90
+10-best oracle              1.31        4.25
+10-best T5 uncon            3.86        7.72
+10-best T5 constr           2.62        6.65
+
+Interpretation:
+- Domain/ASR mismatch can make unconstrained rewriting unsafe.
+- Candidate constraints provide a robustness mechanism under mismatch.
+
+9.3 Zero-shot EC, WER (%)
+-------------------------
+
+                           Transducer                     Whisper
+Method / decoding       LB     TED    Artie           LB     TED    Artie
+----------------------------------------------------------------------------
+Baseline               6.90   13.53   23.67          7.37   3.89    9.03
+5-best oracle          4.59   10.71   17.95          5.24   2.59    5.59
+10-best T5             6.10     -       -            6.39    -       -
+GPT-3.5 uncon          6.64   11.35   18.73          7.71   5.84    8.30
+GPT-3.5 constr         6.52   12.61   21.88          7.24   4.19    8.47
+GPT-3.5 closest        6.29   11.97   20.64          7.15   4.56    8.21
+GPT-4 uncon            5.79    9.09   17.35          6.67   4.60    7.53
+GPT-4 constr           6.55   11.91   20.97          7.17   4.58    8.46
+GPT-4 closest          5.98   11.67   20.40          6.76   4.25    7.86
+
+[PAPER] GPT-3.5 occasionally truncated outputs, increasing deletion errors. Projection to
+the N-best list reduced this failure. GPT-4 benefited more often from unconstrained
+freedom. Whisper N-best lists were less useful in several conditions because they
+contained repeated or formatting-only alternatives and more insertion/deletion variation.
+
+9.4 N-best size ablation for supervised T5, WER (%)
+---------------------------------------------------
+
+Input N        Transducer clean  Transducer other  Whisper clean  Whisper other
+--------------------------------------------------------------------------------
+Baseline             2.79              6.90             3.52           7.37
+1-best T5            2.94              7.00             3.16           7.03
+5-best T5            2.63              6.49             2.86           6.59
+10-best T5           2.54              6.37             2.90           6.39
+
+[PAPER] More hypotheses generally help, but improvement is not monotonic or proportional.
+
+9.5 N-best size ablation for GPT-3.5 on Transducer outputs, WER (%)
+-------------------------------------------------------------------
+
+Input N                 LibriSpeech other  TED-LIUM3  Artie Bias
+-----------------------------------------------------------------
+Baseline                       6.90          13.53      23.67
+1-best                         8.25          11.95      21.19
+3-best                         7.01          11.31      18.84
+5-best                         6.64          11.35      18.73
+10-best                        6.69          11.29      18.72
+
+9.6 Hypothesis-order ablation for 10-best T5, WER (%)
+------------------------------------------------------
+
+Order       Libri clean  Libri other  Whisper/TED  Whisper/Artie  MGB
+------------------------------------------------------------------------
+Sorted          2.90         6.39         3.64          8.14       12.71
+Random          3.31         6.82         3.74          8.50       13.01
+Reversed        3.50         7.18         3.75          8.57       12.99
+
+[PAPER] T5 implicitly learns useful ranking information from the ordered concatenation.
+The paper reports that zero-shot GPT models were much less sensitive to analogous order
+perturbations.
+
+9.7 N-best diversity statistics for 5-best lists
+------------------------------------------------
+
+Data        ASR          Uniq   Cross WER: total / sub / del / ins
+-------------------------------------------------------------------
+LB clean    Transducer    4.7       8.0 / 6.0 / 1.0 / 1.0
+LB clean    Whisper       2.5      10.6 / 5.9 / 2.4 / 2.3
+LB other    Transducer    4.9       9.1 / 7.1 / 1.0 / 1.0
+LB other    Whisper       3.0      10.5 / 7.5 / 1.5 / 1.5
+TED         Transducer    5.0       7.4 / 5.4 / 1.0 / 1.0
+TED         Whisper       2.6       8.3 / 3.7 / 2.3 / 2.3
+Artie       Transducer    4.8      19.9 /15.3 / 2.3 / 2.3
+Artie       Whisper       2.9      19.7 /15.3 / 2.2 / 2.2
+
+9.8 Multi-model N-best combination, LibriSpeech test_other WER (%)
+------------------------------------------------------------------
+
+Definitions:
+T     = Transducer T1,T2,T3,T4,T5
+E     = Whisper small.en E1,E2,E3,E4,E5
+S     = Whisper small S1,S2,S3,S4,S5
+Comb1 = E1,E2,T1,T2,T3
+Comb2 = S1,S2,E1,E2,E3
+
+Method                 T      E      S     Comb1  Comb2
+-------------------------------------------------------
+Baseline              6.90   7.37   7.20   5.95   6.82
+5-best oracle         4.59   5.24   5.21   3.35   4.40
+GPT-3.5 uncon         6.64   7.71   7.46   6.78   7.08
+GPT-3.5 closest       6.29   7.15   7.06   6.01   6.46
+GPT-4 uncon           5.79   6.67   6.49   4.72   5.70
+GPT-4 closest         5.98   6.76   6.51   5.00   5.80
+
+[PAPER] ROVER is used as a training-free baseline and to explore candidate combinations.
+[OPEN-GAP] The paper does not fully state whether the best combination was selected on a
+dedicated validation split or after observing the test set. A reproduction must choose
+candidate ordering on development data only.
+
+9.9 Chinese AISHELL-1 CER (%)
+----------------------------
+
+Method              Whisper small  Whisper medium  Whisper large-v2
+---------------------------------------------------------------------
+Baseline                 10.02            6.59             5.33
+5-best oracle             6.54            3.98             3.13
+GPT-4 uncon               7.86            5.74             5.18
+GPT-4 closest             8.02            5.59             4.91
+
+9.10 Data-contamination quiz: fraction selecting original test sentence
+------------------------------------------------------------------------
+
+Dataset          GPT-3.5   GPT-4
+---------------------------------
+Libri test_other   0.07     0.33
+TED-LIUM3          0.05     0.22
+Artie Bias         0.14     0.15
+MGB-3              0.04     0.02
+Linguaskill        0.03     0.09
+
+Lower is interpreted as less evidence that the model recognizes the exact benchmark text.
+This quiz is a diagnostic, not proof of membership or non-membership in pretraining data.
+
+======================================================================
+10. N-BEST ANALYSIS AND MODEL ENSEMBLING
+======================================================================
+
+10.1 Ranking information
+------------------------
+[PAPER] The T5 input does not include a separate numeric rank embedding, yet sorted input
+outperforms randomized and reversed input. The implementation must therefore preserve
+candidate order and must not use an unordered container.
+
+10.2 Whisper diversity issue
+----------------------------
+[PAPER] Whisper often returns alternatives that differ mainly in capitalization,
+punctuation, or inverse text normalization. After these differences are normalized,
+there may be fewer unique hypotheses than requested. Some Whisper alternatives also vary
+through omissions or insertions, creating high cross-hypothesis deletion/insertion rates.
+
+[RECOMMENDATION] Before EC training, produce a diversity report with:
+- requested N;
+- raw unique count;
+- normalized unique count;
+- top-1-to-candidate edit distances;
+- pairwise S/D/I;
+- oracle WER as N grows;
+- percentage of utterances for which the reference word absent from top-1 appears in any
+  alternative.
+
+10.3 Multi-model N-best construction
+------------------------------------
+[PAPER] N-best hypotheses from recognizers with different architectures or training data
+can be combined. The LLM then acts as a model-ensemble mechanism.
+
+[RECOMMENDATION]
+- Define each combination as a static rank-selection policy.
+- Tune the policy on development data.
+- Keep source model ID and original rank on every candidate.
+- Deduplicate only in an explicit experimental condition.
+- Compare against ROVER and against each constituent model.
+
+======================================================================
+11. DATA-CONTAMINATION DIAGNOSTIC
+======================================================================
+
+[PAPER] The paper adapts a data-contamination quiz:
+1. Randomly sample 100 test references per dataset.
+2. Ask an LLM to make a meaning-preserving paraphrase that changes words, uses lowercase,
+   and omits punctuation.
+3. Give a second LLM a three-choice task: original sentence, paraphrase, or neither.
+4. Swap the order of original and paraphrase in another run to reduce positional bias.
+5. Report the fraction of samples for which the original test sentence is selected.
+
+[OPEN-GAP]
+- Exact model sampling parameters.
+- Number and selection policy of generated paraphrases.
+- Handling of invalid/paraphrases that are not meaning-equivalent.
+- Whether reported values average both option orders at the item or aggregate level.
+
+[RECOMMENDATION]
+- Cache paraphrases and review a random quality sample.
+- Use deterministic generation where possible.
+- Run both A/B orders for every item.
+- Store raw answers and parser status.
+- Report confidence intervals on the resulting proportion.
+- Never interpret the diagnostic as conclusive proof of contamination.
+
+======================================================================
+12. REPRODUCTION GATES AND ACCEPTANCE BANDS
+======================================================================
+
+Gate 1 - Data
+- Exact public split counts match the manifest.
+- No duplicate utterance IDs.
+- Audio and reference hashes stored.
+
+Gate 2 - Evaluation
+- WER unit tests match hand-computed examples and a second scorer.
+- Corpus WER is based on summed edits, not mean sentence WER.
+
+Gate 3 - ASR baseline
+- Recomputed WER matches the ASR run's own report.
+- For a strict comparison, target within about +/-0.10 absolute WER.
+- For method reproduction with a different public checkpoint, disclose the mismatch and
+  compare relative WERR rather than pretending to match the paper.
+
+Gate 4 - N-best quality
+- N-best lists are sorted by the recorded score.
+- Requested N is present or missing candidates are explicitly marked.
+- Oracle WER decreases as N grows in aggregate.
+- Diversity statistics are produced before EC training.
+
+Gate 5 - T5 data/training
+- Input serialization round-trips in tests.
+- No reference leakage in N-best input artifacts.
+- Train/validation loss decreases without exploding deletion rate.
+
+Gate 6 - Main EC result
+Suggested method-reproduction tolerance, after baseline alignment:
+- in-domain supervised T5: approximately +/-0.15 to +/-0.30 absolute WER;
+- oracle WER: approximately +/-0.05 to +/-0.15;
+- qualitative ranking of main methods should be similar, while recognizing that small
+  WER differences may reverse under a different ASR checkpoint.
+
+Gate 7 - Zero-shot
+- Exact paper numbers are not an acceptance requirement because the historical models are
+  retired.
+- Acceptance is based on reproducible request logging, valid parsing, and comparison with
+  top-1, oracle, and current-model baselines.
+
+======================================================================
+13. AMBIGUITY AND RISK LEDGER
+======================================================================
+
+ID  Missing or ambiguous detail                         Risk     Required response
+--------------------------------------------------------------------------------------
+A1  Exact Transducer checkpoint/config                 High     Pin closest public model;
+                                                               document mismatch or retrain.
+A2  Exact Whisper revision and N-best patch            High     Implement and test patch;
+                                                               publish diff and candidate scores.
+A3  T5 input separator/prefix/tokenizer treatment      High     Configurable ablation on dev.
+A4  T5 decoding beam/length settings                   Medium   Validation sweep; freeze before test.
+A5  Score length normalization in constrained search   High     Raw-score main attempt plus labeled
+                                                               normalization ablations.
+A6  Closest distance unit and tie-break                Medium   Word-level English; char-level Chinese;
+                                                               deterministic tie policy.
+A7  Whisper segment-to-utterance N-best composition    High     Prefer utterance decode; otherwise define
+                                                               exact cross-segment beam combination.
+A8  Whisper training-pair augmentation                 High     Compare clean vs augmented explicitly.
+A9  Random seeds and run count                         Medium   At least three seeds after pipeline freeze.
+A10 Exact text normalizer revision                     High     Pin code and test fixtures.
+A11 Historical GPT snapshots unavailable              High     Label current run method-compatible only.
+A12 Lattice conversion/edge scoring                    High     Separate milestone with toy golden tests.
+A13 Multi-model candidate policy selection split       Medium   Select on development data only.
+A14 Contamination prompt/sampling details              Medium   Cache all prompts/outputs and report choices.
+A15 Internal MGB-3/Linguaskill data unavailable        High     Reproduce public portion only; mark omission.
+
+======================================================================
+14. EXPERIMENT MATRIX
+======================================================================
+
+Minimum publishable matrix:
+
+ASR backend:
+- Whisper small.en reproduction backend.
+- One ESPnet Conformer-Transducer backend if resources permit.
+
+N:
+- 1, 5, 10.
+
+T5 decoding:
+- unconstrained.
+- N-best constrained.
+- closest.
+- lattice for Transducer extension.
+
+Transfer:
+- in-domain LibriSpeech.
+- TED-LIUM3 and Artie Bias without EC fine-tuning.
+- cross-ASR: train on one recognizer's outputs, apply to the other.
+
+Ablations:
+- sorted, randomized, reversed N-best order.
+- literal separator vs added separator token.
+- raw vs length-normalized score interpolation.
+- clean vs strong-augmentation training hypotheses.
+
+Zero-shot:
+- current pinned LLM, unconstrained.
+- current pinned LLM, constrained selection.
+- closest projection of unconstrained output.
+
+Metrics:
+- WER and WERR.
+- oracle WER.
+- S/D/I.
+- Uniq and cross-WER.
+- exact-copy rate and overcorrection rate.
+- latency, throughput, tokens, and API cost.
+
+======================================================================
+15. REPRODUCIBILITY REPORT CHECKLIST
+======================================================================
+
+A final report must contain:
+- paper citation and reproduction level;
+- hardware and operating system;
+- repository commit;
+- dependency lock hash;
+- every model ID/revision and license;
+- dataset versions and manifest hashes;
+- ASR baseline and oracle tables;
+- full EC hyperparameters;
+- input serialization examples;
+- exact prompts and API request settings;
+- score definitions and lambda values;
+- raw/normalized evaluation policies;
+- number of invalid LLM responses and retry policy;
+- random seeds and variability;
+- differences from the paper;
+- failed experiments and known limitations;
+- table mapping reproduced values to paper values.
+
+The central scientific rule is: do not attribute a WER gap to the EC method until the ASR
+hypotheses, candidate diversity, and normalization have been examined.

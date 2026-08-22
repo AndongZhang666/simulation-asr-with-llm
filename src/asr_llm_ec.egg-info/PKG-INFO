@@ -1,0 +1,40 @@
+Metadata-Version: 2.4
+Name: asr-llm-ec
+Version: 0.1.0
+Summary: Reproducible ASR error correction with N-best language-model inputs
+Author: ASR-LLM-EC reproduction contributors
+License: Apache-2.0
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: PyYAML<7,>=6
+Provides-Extra: asr
+Requires-Dist: openai-whisper==20250625; extra == "asr"
+Provides-Extra: dev
+Requires-Dist: jsonschema<5,>=4; extra == "dev"
+Requires-Dist: mypy<2,>=1.15; extra == "dev"
+Requires-Dist: pytest<10,>=9; extra == "dev"
+Requires-Dist: ruff<1,>=0.11; extra == "dev"
+Requires-Dist: types-PyYAML<7,>=6.0.12; extra == "dev"
+
+# ASR Error Correction With LLMs
+
+This repository is an independent Level B method reproduction of Ma et al. (2025),
+with a reusable Level C research framework. It is not the authors' source code and does
+not claim historical numerical replication.
+
+The current milestone implements typed, immutable records and will establish trustworthy
+normalization and corpus metrics before any dataset download, ASR decoding, model
+training, or paid API use.
+
+See [docs/REPRODUCTION_PLAN.md](docs/REPRODUCTION_PLAN.md) for the scoped plan and
+[docs/REPRODUCIBILITY_GAPS.md](docs/REPRODUCIBILITY_GAPS.md) for explicit limitations.
+
+## Development
+
+Use the committed `uv.lock` to create the development environment and run the Phase 1
+quality checks:
+
+```bash
+uv sync --extra dev
+make check
+```

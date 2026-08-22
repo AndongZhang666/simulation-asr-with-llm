@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asr-llm-ec.local/schemas/utterance_record.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "utt_id", "dataset", "split", "audio_path", "reference", "asr", "lattice_uri", "provenance"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "utt_id": {"type": "string", "minLength": 1},
+    "dataset": {"type": "string", "minLength": 1},
+    "split": {"type": "string", "minLength": 1},
+    "audio_path": {"type": "string", "minLength": 1},
+    "reference": {"$ref": "#/$defs/text_fields"},
+    "lattice_uri": {"type": ["string", "null"]},
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["created_utc", "host", "software_lock_sha256", "normalizer_id"],
+      "properties": {
+        "created_utc": {"type": "string", "minLength": 1},
+        "host": {"type": "string", "minLength": 1},
+        "software_lock_sha256": {"type": ["string", "null"]},
+        "normalizer_id": {"type": ["string", "null"]}
+      }
+    },
+    "asr": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["system_id", "checkpoint", "code_revision", "decode_config_sha256", "hypotheses"],
+      "properties": {
+        "system_id": {"type": "string", "minLength": 1},
+        "checkpoint": {"type": "string", "minLength": 1},
+        "code_revision": {"type": "string", "minLength": 1},
+        "decode_config_sha256": {"type": ["string", "null"]},
+        "hypotheses": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/hypothesis"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "text_fields": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["raw", "normalized"],
+      "properties": {
+        "raw": {"type": "string"},
+        "normalized": {"type": "string"}
+      }
+    },
+    "hypothesis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rank", "text_raw", "text_normalized", "token_ids", "token_logprobs", "sequence_logscore", "score_type", "length_penalty", "source_system_id", "source_original_rank", "metadata"],
+      "properties": {
+        "rank": {"type": "integer", "minimum": 1},
+        "text_raw": {"type": "string"},
+        "text_normalized": {"type": "string"},
+        "token_ids": {"type": "array", "items": {"type": "integer"}},
+        "token_logprobs": {"type": "array", "items": {"type": "number"}},
+        "sequence_logscore": {"type": ["number", "null"]},
+        "score_type": {"enum": ["sum_logprob", "length_normalized_logprob", "rnnt_score", "unknown"]},
+        "length_penalty": {"type": ["number", "null"]},
+        "source_system_id": {"type": "string", "minLength": 1},
+        "source_original_rank": {"type": "integer", "minimum": 1},
+        "metadata": {"type": "object"}
+      }
+    }
+  }
+}

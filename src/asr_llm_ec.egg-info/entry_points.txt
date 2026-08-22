@@ -1,0 +1,2 @@
+[console_scripts]
+asr-ec = asr_ec.cli:main

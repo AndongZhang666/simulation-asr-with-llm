@@ -1,0 +1,467 @@
+ASR ERROR CORRECTION USING LARGE LANGUAGE MODELS
+OPEN-SOURCE AND REPRODUCIBILITY INVESTIGATION
+
+Investigation date
+------------------
+2026-08-21
+
+Scope
+-----
+The investigation looked for:
+- an official repository for the exact 2025 target paper;
+- code from the authors' earlier N-best T5 work;
+- public implementations of the paper's required ASR, T5, scoring, ROVER, normalization,
+  dataset, and contamination components;
+- adjacent EC repositories that may reduce engineering effort without being confused
+  with the target implementation;
+- historical-service constraints affecting zero-shot reproduction.
+
+Important interpretation rule
+-----------------------------
+"Public code exists for a component" does not mean "the paper's code is public." Exact,
+reusable, and adjacent implementations are classified separately below.
+
+======================================================================
+1. STATUS OF THE EXACT TARGET IMPLEMENTATION
+======================================================================
+
+Conclusion
+----------
+[WEB-VERIFIED] No official source repository for the exact paper was located in the
+targeted searches of the paper title, author names, author GitHub profiles, paper pages,
+and code-index pages.
+
+This conclusion is deliberately phrased as "not located," not as proof that no private,
+unindexed, later-released, or differently named repository exists.
+
+Evidence observed
+-----------------
+- The paper and accepted-manuscript pages are available.
+- Code-index/search pages did not expose a confirmed author repository.
+- The inspected author GitHub presence did not show a repository whose description or
+  contents match the full paper.
+- An inspected Whisper fork associated with an author did not appear to contain the
+  paper's ten-best/token-probability patch.
+- The earlier "N-best T5" paper is public, but a matching official implementation was not
+  located in the targeted search.
+
+Practical implication
+---------------------
+The reproduction must implement the experiment orchestration, N-best artifact schema,
+T5 training pipeline, constrained/closest search, likely Whisper patch, and paper-table
+reporting. Public libraries can supply most primitives.
+
+======================================================================
+2. CORE PUBLIC COMPONENTS TO REUSE
+======================================================================
+
+Component: OpenAI Whisper
+-------------------------
+Classification: official building block, not target-paper code.
+Repository:
+  https://github.com/openai/whisper
+License:
+  MIT (verify at the pinned revision).
+Use:
+- Whisper small.en model and English text normalizer.
+- Decoder internals for extracting finalized beam candidates.
+Evidence useful to the reproduction:
+- An official project discussion explains that beam candidates are ranked by a
+  `SequenceRanker` and suggests modifying that stage to expose multiple results.
+Caveat:
+- The target paper's exact patch, model/code revision, and segment-level N-best handling
+  were not published in the article.
+
+Component: ESPnet
+-----------------
+Classification: official toolkit used by the paper, but exact experiment config unknown.
+Repository:
+  https://github.com/espnet/espnet
+License:
+  Apache-2.0 (verify at the pinned revision).
+Use:
+- LibriSpeech Conformer-Transducer recipe.
+- Beam decoding, SpecAugment, speed perturbation, and possible lattice/candidate export.
+Candidate public starting point:
+- Hugging Face model ID:
+  `espnet/chai_librispeech_asr_train_conformer-rnn_transducer_raw_en_bpe5000_sp`
+- Its model card/config reports a LibriSpeech Conformer-RNN-Transducer with a 12-block,
+  512-dimensional encoder and one-layer LSTM predictor. The no-LM test WER shown on the
+  card is approximately 2.8 on test-clean and 6.6 on test-other.
+Caveat:
+- A close public checkpoint inspected during the investigation did not match every paper
+  field; in particular, a public config's joint space differed from the article's stated
+  512 dimension. Its reported WER was close but not identical. Treat it as a starting
+  point, not the exact checkpoint.
+
+Component: T5 / Hugging Face Transformers
+-----------------------------------------
+Classification: official model/library building blocks.
+Repositories:
+  https://github.com/google-research/text-to-text-transfer-transformer
+  https://github.com/huggingface/transformers
+Licenses:
+  Apache-2.0 for these repositories at the time inspected; verify pinned revisions and
+  model-card terms.
+Use:
+- T5-base tokenizer/model.
+- `T5ForConditionalGeneration` for fine-tuning, generation, and teacher-forced candidate
+  scoring.
+Caveat:
+- The paper does not identify an exact T5 revision or tokenizer treatment of `[SEP]`.
+
+Component: NIST SCTK (`sclite`, `rover`)
+----------------------------------------
+Classification: official evaluation/ensemble toolkit.
+Repository:
+  https://github.com/usnistgov/SCTK
+License:
+- Follow the repository's current NIST license file at the pinned revision.
+Use:
+- Independent WER verification with `sclite`.
+- ROVER baseline for combining ASR outputs.
+Caveat:
+- The reproduction still needs adapters from its JSONL predictions to SCTK STM/CTM or
+  other accepted formats.
+
+Component: Data Contamination Quiz
+----------------------------------
+Classification: official implementation of the method adapted by the target paper.
+Repository:
+  https://github.com/shahriargolchin/DCQ
+License:
+  Apache-2.0 at the time inspected; verify the pinned revision.
+Search anchor:
+  Paper title: "Data Contamination Quiz: A Tool to Detect and Estimate Contamination in
+  Large Language Models," Golchin and Surdeanu.
+Use:
+- Prompt/data organization concepts and evaluation framework.
+Caveat:
+- The target article uses its own three-choice original/paraphrase/neither variation and
+  option-order swap. Reproduce the article's procedure rather than assuming a public
+  repository exactly implements it.
+
+Component: Chinese text normalization
+-------------------------------------
+Classification: public component explicitly linked by the target paper.
+Repository:
+  https://github.com/speechio/chinese_text_normalization
+License:
+  MIT at the time inspected; verify the pinned revision.
+Use:
+- AISHELL-1 reference/hypothesis normalization before CER.
+
+======================================================================
+3. PUBLIC DATA SOURCES
+======================================================================
+
+LibriSpeech
+-----------
+Primary public source:
+  https://www.openslr.org/12
+Use:
+- 960-hour training corpus and standard dev/test splits.
+Checks:
+- manifest counts, audio hashes, reference text, and license terms.
+
+TED-LIUM Release 3
+------------------
+Primary public source:
+  https://www.openslr.org/51
+Use:
+- out-of-domain test set.
+Checks:
+- release version and test segmentation.
+
+Artie Bias Corpus
+-----------------
+Project/repository search anchor:
+  "Artie Bias Corpus" and the cited LREC 2020 paper.
+One public source:
+  https://github.com/artie-inc/artie-bias-corpus
+Use:
+- out-of-domain demographic-bias speech test subset.
+Checks:
+- exact split used by the target paper and any updates to the repository.
+
+AISHELL-1
+---------
+Primary public source:
+  https://www.openslr.org/33
+Use:
+- Mandarin test set and CER evaluation.
+Checks:
+- standard 7,176-utterance test manifest and normalization policy.
+
+MGB-3 and Linguaskill
+---------------------
+Classification:
+- Not fully public/reproducible in the same way for this experiment.
+Use in target paper:
+- Data-contamination comparison.
+Action:
+- Omit or replace with clearly labeled public datasets unless access is independently
+  obtained. Do not fabricate these results.
+
+======================================================================
+4. HIGHLY RELEVANT PRIOR/ADJACENT CODE
+======================================================================
+
+4.1 N-best T5 prior paper
+-------------------------
+Reference:
+- Ma et al., "N-best T5: Robust ASR Error Correction Using Multiple Input Hypotheses and
+  Constrained Decoding Space," Interspeech 2023.
+Classification:
+- Direct methodological predecessor and strongest supplementary specification.
+Useful information:
+- N-best concatenation, T5 task prefix, augmentation, score interpolation, and lattice
+  search details.
+Code status:
+- No confirmed official repository was located in the targeted search.
+Action:
+- Use the paper to resolve intent, but record additions as REFERENCE-PAPER rather than
+  attributing them to the 2025 article.
+
+4.2 FlanEC
+----------
+Repository:
+  https://github.com/MorenoLaQuatra/FlanEC
+Classification:
+- Adjacent open implementation, not the target method.
+License:
+- MIT at the time inspected.
+Useful parts:
+- N-best-to-Flan-T5 data format.
+- Fine-tuning and LoRA scripts.
+- Inference configs and public checkpoints.
+Why it is not a drop-in reproduction:
+- Different model family/prompt/data and challenge setup.
+Recommended use:
+- Reference code for dataset collation, training loops, and N-best generation interfaces.
+
+4.3 N-Best-ASR-Transformer
+--------------------------
+Repository:
+  https://github.com/skit-ai/N-Best-ASR-Transformer
+Classification:
+- Related N-best concatenation code for spoken-language understanding, not EC.
+Useful parts:
+- Ordered hypotheses separated by `[SEP]`.
+- Tests/precedent for a simple concatenation representation.
+Why it is not target code:
+- Encoder classification for SLU rather than T5 sequence generation and EC decoding.
+
+4.4 Whispering-LLaMA
+--------------------
+Repository:
+  https://github.com/Srijith-rkr/WHISPERing-LLaMA
+Classification:
+- Related multimodal generative EC system cited in neighboring literature, not the target
+  text-only N-best T5/zero-shot method.
+Useful parts:
+- N-best datasets, generative EC training, and audio/LLM integration examples.
+Why it is not target code:
+- Uses acoustic features and LLaMA-family training.
+
+4.5 FastCorrect2 and SoftCorrect
+--------------------------------
+Search anchors:
+  Microsoft Research / `microsoft/NeuralSpeech` or the currently maintained official
+  repository for FastCorrect2/SoftCorrect.
+Classification:
+- Related non-autoregressive ASR correction, not the target method.
+Useful parts:
+- Multiple-candidate preprocessing and correction evaluation.
+Why it is not target code:
+- Different architecture and decoding objective.
+
+4.6 Generic LLM ASR EC repositories
+-----------------------------------
+Examples located include projects that prompt current LLMs over ASR transcripts and
+compute WER. They can help with API caching and evaluation but are not evidence of the
+paper's implementation. Evaluate maintenance, license, tests, and methodological fit
+before reuse.
+
+======================================================================
+5. WHISPER N-BEST IMPLEMENTATION OPTIONS
+======================================================================
+
+Option A - Patch official Whisper decoder
+-----------------------------------------
+Preferred for fidelity.
+- Intercept candidates after beam finalization and before one-best ranking.
+- Expose tokens, cumulative log probabilities, and decoded strings.
+- Preserve stock top-1 behavior.
+- Publish a small, reviewable patch and regression tests.
+
+Option B - Use an existing Whisper N-best fork
+----------------------------------------------
+Potentially faster, but inspect carefully.
+- Verify the fork actually returns finalized beam candidates rather than independent
+  stochastic samples.
+- Verify branch age and compatibility with the pinned official model.
+- Diff every decoder change.
+- Do not use an unverified fork for headline results.
+
+Option C - Hugging Face Transformers Whisper generation
+--------------------------------------------------------
+Method-compatible alternative if it exposes `num_return_sequences` and sequence scores.
+Caveat:
+- Tokenization/decoding behavior may differ from the original OpenAI implementation and
+  therefore from the paper. Treat it as a different ASR backend unless parity is proven.
+
+Required verification for every option
+--------------------------------------
+- N=1 top-1 parity.
+- Candidate score order.
+- deterministic replay.
+- duplicate handling.
+- token/sequence score consistency.
+- exact model and code revision.
+
+======================================================================
+6. HISTORICAL LLM AVAILABILITY
+======================================================================
+
+[PAPER] The zero-shot experiments used:
+- `gpt-3.5-turbo-0613`.
+- `gpt-4-0125-preview`.
+
+[WEB-VERIFIED]
+- `gpt-3.5-turbo-0613` was shut down in 2024.
+- `gpt-4-0125-preview` was shut down in March 2026.
+
+Consequence
+-----------
+A new API call cannot be assumed to invoke either historical model. Exact zero-shot
+reproduction requires one of:
+1. Author-provided raw responses.
+2. A legally retained private deployment or snapshot.
+3. A provider-supported archival endpoint, if one exists and is verified.
+
+Otherwise:
+- use a currently available pinned model;
+- preserve prompt and decoding logic;
+- call the result a current-model or method-compatible reproduction;
+- never place the new result in the paper's GPT-3.5/GPT-4 row without a new model label.
+
+======================================================================
+7. RECOMMENDED REUSE PRIORITY
+======================================================================
+
+Priority 1 - Use directly
+-------------------------
+- Official public datasets.
+- Official Whisper model/normalizer with a minimal tested N-best patch.
+- ESPnet for Transducer recipes and decoding.
+- Hugging Face Transformers/T5 for supervised EC.
+- NIST SCTK for independent scoring and ROVER.
+- Official Chinese normalizer linked by the paper.
+
+Priority 2 - Read and selectively adapt
+---------------------------------------
+- Earlier N-best T5 paper.
+- FlanEC training/inference structure.
+- N-Best-ASR-Transformer separator handling.
+- Official Whisper discussions about exposing beam candidates.
+- Data Contamination Quiz framework.
+
+Priority 3 - Use only as comparison or inspiration
+---------------------------------------------------
+- Unrelated/current LLM correction wrappers.
+- Multimodal EC systems.
+- Non-autoregressive correction models.
+- Unmaintained Whisper forks without parity tests.
+
+======================================================================
+8. DEPENDENCY PROVENANCE MANIFEST
+======================================================================
+
+Create `third_party_manifest.yaml` with entries like:
+
+- name: openai-whisper
+  role: asr_backend_and_english_normalizer
+  upstream: https://github.com/openai/whisper
+  revision: <git-sha>
+  license_file_sha256: <sha256>
+  local_patch: patches/whisper_nbest.patch
+  local_patch_sha256: <sha256>
+  exact_target_code: false
+
+- name: espnet
+  role: conformer_transducer
+  upstream: https://github.com/espnet/espnet
+  revision: <git-sha>
+  config: configs/asr/<exact-yaml>
+  checkpoint_sha256: <sha256>
+  architecture_mismatches: []
+  exact_target_code: false
+
+- name: transformers
+  role: t5_ec
+  upstream: https://github.com/huggingface/transformers
+  revision: <git-sha-or-version>
+  model_id: <model-id>
+  model_revision: <revision>
+  exact_target_code: false
+
+- name: sctk
+  role: scorer_and_rover
+  upstream: https://github.com/usnistgov/SCTK
+  revision: <git-sha>
+  exact_target_code: false
+
+Never use an unversioned `pip install` record as provenance for a reported experiment.
+
+======================================================================
+9. CLAIMS THAT ARE SAFE AND UNSAFE
+======================================================================
+
+Safe claims
+-----------
+- "We independently reimplemented the method described by Ma et al."
+- "We used public Whisper/ESPnet/T5 components and a custom orchestration layer."
+- "No official implementation was located in our search as of 2026-08-21."
+- "Our zero-shot experiment uses a modern replacement because the paper's snapshots are
+  retired."
+- "The public Transducer checkpoint is close to but not identical to the architecture or
+  baseline reported in the paper."
+
+Unsafe claims
+-------------
+- "This is the authors' code" without confirmation.
+- "Exact reproduction" when ASR hypotheses, checkpoint, normalizer, or GPT snapshot differ.
+- "The paper used this GitHub fork" merely because it exposes N-best Whisper output.
+- "The public ESPnet model is the paper's model" based only on approximate WER.
+- "No code exists" rather than the narrower "no official code was located."
+
+======================================================================
+10. FINAL INVESTIGATION ASSESSMENT
+======================================================================
+
+Rebuild feasibility
+-------------------
+High for:
+- N-best artifact schema.
+- T5 fine-tuning.
+- unconstrained, constrained, and closest decoding.
+- public datasets and metrics.
+- order/diversity/ensemble analysis.
+
+Moderate for:
+- matching the Whisper baseline and N-best distribution, because the exact patch/revision
+  is missing but official decoder code is available.
+- matching the Transducer baseline, because a close ESPnet recipe exists but exact model
+  identity is uncertain.
+
+Lower for exact historical replication of:
+- lattice decoding, due to unspecified graph export/conversion details.
+- zero-shot GPT tables, because the exact model snapshots are retired.
+- internal-dataset contamination results, due to unavailable data.
+
+Recommended scientific framing
+------------------------------
+Present the project as a rigorous independent method reproduction with an explicit
+historical-replication gap analysis. This framing is stronger and more trustworthy than
+forcing exact-looking numbers from mismatched components.
